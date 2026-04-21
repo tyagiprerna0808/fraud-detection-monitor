@@ -25,6 +25,29 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
+Run a config-driven training benchmark:
+
+```powershell
+python train.py --config configs/train_config.json --save-artifacts
+```
+
+This command writes `artifacts/train_metrics.json`.
+
+## Day 1 production baseline
+
+Generate reproducible baseline metrics for tracking the production migration plan.
+
+```powershell
+python scripts/baseline_benchmark.py
+```
+
+This command writes:
+
+- `artifacts/baseline_metrics.json`
+- `artifacts/baseline_metrics.md`
+
+It also uses the Day 1 charter at `docs/production_day1_charter.md` as the execution reference.
+
 ## Business framing
 
 This project is positioned like an internal fraud operations console for a payments or wallet product. It is designed to show practical fintech judgment rather than generic machine learning alone.
