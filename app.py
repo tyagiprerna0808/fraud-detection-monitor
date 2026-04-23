@@ -1,104 +1,66 @@
-from pathlib import Path
-import sys
+from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict
+from typing import Literal
 
-import plotly.express as px
-import streamlit as st
-
-ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT / "src"))
-
-from fraud_detection_monitor.data import FEATURE_COLUMNS, generate_transactions
-from fraud_detection_monitor.model import build_fraud_artifacts, score_transaction
+app = FastAPI(title="Fraud Detection Inference API", version="0.1.0")
 
 
-st.set_page_config(page_title="Fraud Detection Monitor", page_icon="🛡️", layout="wide")
+# Input schema for /predict
+class PredictRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")  # reject unknown extra fields
+
+    transaction_amount: float
+    transaction_type: Literal["payment", "transfer", "cash_out", "debit"]
+    account_age_days: int
+    is_foreign_transaction: bool
 
 
-@st.cache_data
-def get_dataset():
-    return generate_transactions()
+# Output schema for /predict
+class PredictResponse(BaseModel):
+    prediction: Literal["fraud", "not_fraud"]
+    confidence: float
+    model_version: str
 
 
-@st.cache_resource
-def get_artifacts():
-    dataset = get_dataset()
-    return build_fraud_artifacts(dataset)
+@app.get("/health")
+def health():
+    return {"status": "ok"}
 
 
-dataset = get_dataset()
-artifacts = get_artifacts()
-leaderboard = artifacts["leaderboard"]
-best_row = leaderboard.iloc[0]
+@app.get("/version")
+def version():
+    return {
+        "app_version": "0.1.0",
+        "model_version": "baseline-v1"
+    }
 
-st.title("Fraud Detection Monitor")
-st.caption("Transaction fraud analytics for fintech payments operations.")
 
-row = st.columns(4)
-row[0].metric("Transactions", f"{len(dataset):,}")
-row[1].metric("Fraud rate", f"{dataset['is_fraud'].mean():.1%}")
-row[2].metric("Best model", best_row["model"])
-row[3].metric("Best recall", f"{best_row['recall']:.2f}")
+@app.post("/predict", response_model=PredictResponse)
+def predict(payload: PredictRequest):
+    # Placeholder logic for Loop 1 (real model comes in Loop 2)
+    if payload.transaction_amount > 1000 and payload.is_foreign_transaction:
+        pred = "fraud"
+        conf = 0.91
+    else:
+        pred = "not_fraud"
+        conf = 0.13
 
-left, right = st.columns((1.15, 1))
-
-with left:
-    st.subheader("Model leaderboard")
-    st.dataframe(
-        leaderboard.style.format(
-            {
-                "auc": "{:.3f}",
-                "precision": "{:.3f}",
-                "recall": "{:.3f}",
-                "f1": "{:.3f}",
-                "accuracy": "{:.3f}",
-            }
-        ),
-        use_container_width=True,
+    return PredictResponse(
+        prediction=pred,
+        confidence=conf,
+        model_version="baseline-v1"
     )
 
-    st.subheader("Fraud probability distribution")
-    probability_chart = px.histogram(
-        artifacts["test_predictions"],
-        x="fraud_probability",
-        color="label",
-        nbins=30,
-        barmode="overlay",
-        color_discrete_map={"Legit": "#0f7c82", "Fraud": "#c75c3f"},
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    # Friendly validation error format
+    return JSONResponse(
+        status_code=422,
+        content={
+            "message": "Invalid request payload",
+            "errors": exc.errors()
+        },
     )
-    probability_chart.update_layout(margin=dict(l=10, r=10, t=20, b=10))
-    st.plotly_chart(probability_chart, use_container_width=True)
-
-with right:
-    st.subheader("Top risk drivers")
-    importance_chart = px.bar(
-        artifacts["feature_importance"].head(10).sort_values("importance"),
-        x="importance",
-        y="feature",
-        orientation="h",
-        color="importance",
-        color_continuous_scale="Sunset",
-    )
-    importance_chart.update_layout(margin=dict(l=10, r=10, t=20, b=10), coloraxis_showscale=False)
-    st.plotly_chart(importance_chart, use_container_width=True)
-
-    st.subheader("Score a transaction")
-    medians = dataset[FEATURE_COLUMNS].median().to_dict()
-    transaction_input = {}
-    with st.form("fraud-transaction-form"):
-        for feature in FEATURE_COLUMNS:
-            low = float(dataset[feature].min())
-            high = float(dataset[feature].max())
-            default = float(medians[feature])
-            transaction_input[feature] = st.slider(feature.replace("_", " ").title(), low, high, default)
-        submitted = st.form_submit_button("Estimate fraud risk")
-
-    if submitted:
-        probability = score_transaction(artifacts["best_model"], transaction_input)
-        status = "High fraud risk" if probability >= 0.5 else "Likely legitimate"
-        color = "#c75c3f" if probability >= 0.5 else "#0f7c82"
-        st.markdown(
-            f"<div style='padding: 1rem; border-radius: 14px; background: {color}; color: white;'>"
-            f"<strong>{status}</strong><br/>Estimated fraud probability: {probability:.1%}"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
