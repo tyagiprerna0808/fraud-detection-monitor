@@ -1,17 +1,20 @@
 name: Docker Build and Health Check
 
 on:
-  push:
-    branches: ["main"]
   workflow_dispatch:
+  push:
+    branches:
+      - main
 
 jobs:
   docker-health:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Verify Dockerfile exists
+        run: ls -la
 
       - name: Build Docker image
         run: docker build -t fraud-detection-monitor:ci .
@@ -19,26 +22,21 @@ jobs:
       - name: Run container
         run: docker run -d --name fraud-app -p 8000:8000 fraud-detection-monitor:ci
 
-      - name: Wait for API startup and call health endpoint
+      - name: Wait and call health endpoint
         run: |
-          for i in {1..30}; do
-            if curl -sSf http://localhost:8000/health > health.json; then
-              echo "Health endpoint is ready."
-              break
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health > health.json; then
+              echo "Health endpoint is ready"
+              cat health.json
+              exit 0
             fi
-            echo "Waiting for API startup... attempt $i"
+            echo "Waiting for startup attempt $i"
             sleep 2
           done
+          echo "Health check failed"
+          docker logs fraud-app
+          exit 1
 
-          echo "Health response:"
-          cat health.json
-
-      - name: Show container logs
+      - name: Cleanup container
         if: always()
-        run: docker logs fraud-app || true
-
-      - name: Stop and remove container
-        if: always()
-        run: |
-          docker stop fraud-app || true
-          docker rm fraud-app || true
+        run: docker rm -f fraud-app || true
