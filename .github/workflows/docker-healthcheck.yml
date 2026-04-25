@@ -9,6 +9,7 @@ on:
 jobs:
   docker-health:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,7 +21,16 @@ jobs:
         run: docker build -t fraud-detection-monitor:ci .
 
       - name: Run container
-        run: docker run -d --name fraud-app -p 8000:8000 fraud-detection-monitor:ci
+        run: docker run -d --name fraud-app -e PORT=8000 -p 8000:8000 fraud-detection-monitor:ci
+
+      - name: Confirm container is running
+        run: |
+          docker ps -a
+          if [ "$(docker inspect -f '{{.State.Running}}' fraud-app)" != "true" ]; then
+            echo "Container exited unexpectedly"
+            docker logs fraud-app || true
+            exit 1
+          fi
 
       - name: Wait and call health endpoint
         run: |
@@ -35,6 +45,24 @@ jobs:
             sleep 2
           done
           echo "Health check failed"
+          docker ps -a
+          docker logs fraud-app
+          exit 1
+
+      - name: Wait and call readiness endpoint
+        run: |
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:8000/health/ready > ready.json; then
+              echo "Readiness endpoint is ready"
+              echo "Readiness response:"
+              cat ready.json
+              exit 0
+            fi
+            echo "Waiting for readiness attempt $i"
+            sleep 2
+          done
+          echo "Readiness check failed"
+          docker ps -a
           docker logs fraud-app
           exit 1
 
