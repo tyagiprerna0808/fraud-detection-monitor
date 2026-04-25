@@ -13,7 +13,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Verify Dockerfile exists
+      - name: Verify project files
         run: ls -la
 
       - name: Build Docker image
@@ -27,6 +27,7 @@ jobs:
           for i in $(seq 1 60); do
             if curl -fsS http://127.0.0.1:8000/health > health.json; then
               echo "Health endpoint is ready"
+              echo "Health response:"
               cat health.json
               exit 0
             fi
